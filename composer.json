@@ -1,13 +1,13 @@
 {
-    "name": "jenner/redis_retry",
+    "name": "zkc/redis_retry",
     "description": "phpredis wrapper",
     "license": "MIT",
     "keywords": ["wechat", "api"],
     "version": "v0.1.0",
     "authors": [
         {
-            "name": "Jenner",
-            "email": "hypxm@qq.com"
+            "name": "Z.kc",
+            "email": "zkc226@163.com"
         }
     ],
     "require": {
