@@ -10,125 +10,118 @@
 namespace Jenner\RedisRetry;
 
 
-class RedisRetry extends \Redis {
+class RedisRetry extends \Redis
+{
 
-	private $host;
+    private $host;
 
-	private $port;
+    private $port;
 
-	private $timeout;
+    private $timeout;
 
-	private $password;
+    private $password;
 
-	private $persistent;
-
-	private $db = 0;
-
-	/**
-	 * 重试次数
-	 *
-	 * @var
-	 */
-	public $retry;
-
-	/**
-	 * 重试延迟
-	 *
-	 * @var
-	 */
-	public $delay;
+    private $persistent;
 
 
-	public function __construct() {
-		if (!defined('REDIS_RETRY_TIMES')) {
-			$this->retry = 2;
-		} else {
-			$this->retry = REDIS_RETRY_TIMES;
-		}
+    /**
+     * 重试次数
+     * @var
+     */
+    private $retry;
 
-		if (!defined('REDIS_RETRY_DELAY')) {
-			$this->delay = 1000 * 1000;
-		} else {
-			$this->delay = REDIS_RETRY_DELAY;
-		}
+    /**
+     * 重试延迟
+     * @var
+     */
+    private $delay;
 
-		parent::__construct();
-	}
+    public function __construct()
+    {
+        if (!defined('REDIS_RETRY_TIMES')) {
+            $this->retry = 2;
+        } else {
+            $this->retry = REDIS_RETRY_TIMES;
+        }
 
-	public function connect($host, $port = 6379, $timeout = 0.0) {
-		$this->host       = $host;
-		$this->port       = $port;
-		$this->timeout    = $timeout;
-		$this->persistent = false;
+        if (!defined('REDIS_RETRY_DELAY')) {
+            $this->delay = 1000 * 1000;
+        } else {
+            $this->delay = REDIS_RETRY_DELAY;
+        }
 
-		return parent::connect($host, $port, $timeout);
-	}
+        parent::__construct();
+    }
 
-	public function pconnect($host, $port = 6379, $timeout = 0.0) {
-		$this->host       = $host;
-		$this->port       = $port;
-		$this->timeout    = $timeout;
-		$this->persistent = true;
+    public function connect($host, $port = null, $timeout = null, $retry_interval = null)
+    {
+        if (empty($port)) {
+            $port = 6379;
+        }
+        $this->host       = $host;
+        $this->port       = $port;
+        $this->timeout    = $timeout;
+        $this->persistent = false;
 
-		return parent::pconnect($host, $port, $timeout);
-	}
+        return parent::connect($host, $port, $timeout, $retry_interval);
+    }
 
-	public function auth($password) {
-		$this->password = $password;
+    public function pconnect($host, $port = null, $timeout = null, $retry_interval = null)
+    {
+        if (empty($port)) {
+            $port = 6379;
+        }
+        $this->host       = $host;
+        $this->port       = $port;
+        $this->timeout    = $timeout;
+        $this->persistent = true;
 
-		return $this->retry(array('parent', 'auth'), array($password));
-	}
+        return parent::pconnect($host, $port, $timeout);
+    }
 
-	public function select($db) {
-		$this->db = $db;
+    public function auth($password)
+    {
+        $this->password = $password;
 
-		return $this->retry(array('parent', 'select'), array($db));
-	}
+        return $this->retry(array('parent', 'auth'), array($password));
+    }
 
-	public function retry($fun, array $params) {
-		$retry = $this->retry;
-		$e     = null;
+    public function retry($fun, array $params)
+    {
+        $retry = $this->retry;
+        $e     = null;
+        while ($retry-- > 0) {
+            try {
+                return call_user_func_array($fun, $params);
+            } catch (\RedisException $e) {
+                try {
+                    $this->close();
+                } catch (\RedisException $e) {
+                }
+                if ($this->persistent === true) {
+                    $connect_result = $this->pconnect($this->host, $this->port, $this->timeout);
+                } else {
+                    $connect_result = $this->connect($this->host, $this->port, $this->timeout);
+                }
+                if ($connect_result === false) {
+                    usleep($this->delay);
+                    continue;
+                }
 
-		while ($retry-- > 0) {
-			try {
-				return call_user_func_array($fun, $params);
-			} catch (\RedisException $e) {
-				try {
-					$this->close();
-				} catch (\RedisException $e) {
-				}
-				if ($this->persistent === true) {
-					$connect_result = $this->pconnect($this->host, $this->port, $this->timeout);
-				} else {
-					$connect_result = $this->connect($this->host, $this->port, $this->timeout);
-				}
-				if ($connect_result === false) {
-					usleep($this->delay);
-					continue;
-				}
+                if (!empty($this->password)) {
+                    $auth_result = parent::auth($this->password);
+                    if ($auth_result === false) {
+                        usleep($this->delay);
+                        continue;
+                    }
+                }
+            }
+        }
 
-				if (!empty($this->password)) {
-					$auth_result = parent::auth($this->password);
-					if ($auth_result === false) {
-						usleep($this->delay);
-						continue;
-					}
-				}
-
-				if ($this->db > 0) {
-					$auth_result = parent::select($this->db);
-					if ($auth_result === false) {
-						usleep($this->delay);
-						continue;
-					}
-				}
-			}
-		}
-
-		if ($e instanceof \RedisException) {
-			throw $e;
-		} else {
-			throw new \RedisException('redis retry failed');
-		}
-	}
+        if ($e instanceof \RedisException) {
+            throw $e;
+        } else {
+            throw new \RedisException('redis retry failed');
+        }
+    }
 }
